@@ -275,6 +275,7 @@ class OpenIDClient:
         auth_url = f"{self.authorization_endpoint}?{urlencode(params)}"
 
         # Start the web server as an asyncio task
+        # Test comment
         server_task = asyncio.create_task(self.run_server())
 
         # Open the browser or print the URL for the user
