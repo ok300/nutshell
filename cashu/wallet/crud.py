@@ -9,6 +9,7 @@ from ..core.base import (
     MintQuoteState,
     Proof,
     WalletKeyset,
+    WalletMint,
 )
 from ..core.db import Connection, Database
 
@@ -253,8 +254,8 @@ async def store_bolt11_mint_quote(
     await (conn or db).execute(
         """
         INSERT INTO bolt11_mint_quotes
-            (quote, mint, method, request, checking_id, unit, amount, state, created_time, paid_time, expiry)
-        VALUES (:quote, :mint, :method, :request, :checking_id, :unit, :amount, :state, :created_time, :paid_time, :expiry)
+            (quote, mint, method, request, checking_id, unit, amount, state, created_time, paid_time, expiry, privkey)
+        VALUES (:quote, :mint, :method, :request, :checking_id, :unit, :amount, :state, :created_time, :paid_time, :expiry, :privkey)
         """,
         {
             "quote": quote.quote,
@@ -268,6 +269,7 @@ async def store_bolt11_mint_quote(
             "created_time": quote.created_time,
             "paid_time": quote.paid_time,
             "expiry": quote.expiry,
+            "privkey": quote.privkey or "",
         },
     )
 
@@ -576,3 +578,59 @@ async def store_seed_and_mnemonic(
             "mnemonic": mnemonic,
         },
     )
+
+
+async def store_mint(
+    db: Database,
+    mint: WalletMint,
+    conn: Optional[Connection] = None,
+) -> None:
+    await (conn or db).execute(
+        """
+        INSERT INTO mints
+          (url, info, updated)
+        VALUES (:url, :info, :updated)
+        """,
+        {
+            "url": mint.url,
+            "info": mint.info,
+            "updated": int(time.time()),
+        },
+    )
+
+
+async def update_mint(
+    db: Database,
+    mint: WalletMint,
+    conn: Optional[Connection] = None,
+) -> None:
+    await (conn or db).execute(
+        """
+        UPDATE mints
+        SET info = :info, updated = :updated, access_token = :access_token, refresh_token = :refresh_token, username = :username, password = :password
+        WHERE url = :url
+        """,
+        {
+            "url": mint.url,
+            "info": mint.info,
+            "updated": int(time.time()),
+            "access_token": mint.access_token,
+            "refresh_token": mint.refresh_token,
+            "username": mint.username,
+            "password": mint.password,
+        },
+    )
+
+
+async def get_mint_by_url(
+    db: Database,
+    url: str,
+    conn: Optional[Connection] = None,
+) -> Optional[WalletMint]:
+    row = await (conn or db).fetchone(
+        """
+        SELECT * from mints WHERE url = :url
+        """,
+        {"url": url},
+    )
+    return WalletMint.parse_obj(dict(row)) if row else None

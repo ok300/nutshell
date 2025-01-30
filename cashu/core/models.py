@@ -38,6 +38,11 @@ class MintInfoContact(BaseModel):
     info: str
 
 
+class MintInfoProtectedEndpoint(BaseModel):
+    method: str
+    path: str
+
+
 class GetInfoResponse(BaseModel):
     name: Optional[str] = None
     pubkey: Optional[str] = None
@@ -57,7 +62,7 @@ class GetInfoResponse(BaseModel):
     # BEGIN DEPRECATED: NUT-06 contact field change
     # NUT-06 PR: https://github.com/cashubtc/nuts/pull/117
     @root_validator(pre=True)
-    def preprocess_deprecated_contact_field(cls, values):
+    def preprocess_deprecated_contact_field(cls, values: dict):
         if "contact" in values and values["contact"]:
             if isinstance(values["contact"][0], list):
                 values["contact"] = [
@@ -73,7 +78,6 @@ class GetInfoResponse(BaseModel):
 class Nut15MppSupport(BaseModel):
     method: str
     unit: str
-    mpp: bool
 
 
 class GetInfoResponse_deprecated(BaseModel):
@@ -129,21 +133,25 @@ class PostMintQuoteRequest(BaseModel):
     description: Optional[str] = Field(
         default=None, max_length=settings.mint_max_request_length
     )  # invoice description
+    pubkey: Optional[str] = Field(
+        default=None, max_length=settings.mint_max_request_length
+    )  # NUT-20 quote lock pubkey
 
 
 class PostMintQuoteResponse(BaseModel):
     quote: str  # quote id
     request: str  # input payment request
-    paid: Optional[bool]  # DEPRECATED as per NUT-04 PR #141
-    state: Optional[str]  # state of the quote
+    state: Optional[str]  # state of the quote (optional for backwards compat)
     expiry: Optional[int]  # expiry of the quote
+    pubkey: Optional[str] = None  # NUT-20 quote lock pubkey
+    paid: Optional[bool] = None  # DEPRECATED as per NUT-04 PR #141
 
     @classmethod
-    def from_mint_quote(self, mint_quote: MintQuote) -> "PostMintQuoteResponse":
+    def from_mint_quote(cls, mint_quote: MintQuote) -> "PostMintQuoteResponse":
         to_dict = mint_quote.dict()
         # turn state into string
         to_dict["state"] = mint_quote.state.value
-        return PostMintQuoteResponse.parse_obj(to_dict)
+        return cls.parse_obj(to_dict)
 
 
 # ------- API: MINT -------
@@ -154,6 +162,9 @@ class PostMintRequest(BaseModel):
     outputs: List[BlindedMessage] = Field(
         ..., max_items=settings.mint_max_request_length
     )
+    signature: Optional[str] = Field(
+        default=None, max_length=settings.mint_max_request_length
+    )  # NUT-20 quote signature
 
 
 class PostMintResponse(BaseModel):
@@ -340,3 +351,16 @@ class PostRestoreResponse(BaseModel):
     def __init__(self, **data):
         super().__init__(**data)
         self.promises = self.signatures
+
+
+# ------- API: BLIND AUTH -------
+class PostAuthBlindMintRequest(BaseModel):
+    outputs: List[BlindedMessage] = Field(
+        ...,
+        max_items=settings.mint_max_request_length,
+        description="Blinded messages for creating blind auth tokens.",
+    )
+
+
+class PostAuthBlindMintResponse(BaseModel):
+    signatures: List[BlindedSignature] = []

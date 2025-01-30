@@ -1,4 +1,4 @@
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import List, Literal, Optional, Tuple, Union
 
 from loguru import logger
 
@@ -6,26 +6,25 @@ from ..core.base import (
     BlindedMessage,
     BlindedSignature,
     Method,
-    MintKeyset,
+    MintQuote,
     Proof,
     Unit,
 )
 from ..core.crypto import b_dhke
 from ..core.crypto.secp import PublicKey
-from ..core.db import Connection, Database
+from ..core.db import Connection
 from ..core.errors import (
+    InvalidProofsError,
     NoSecretInProofsError,
     NotAllowedError,
+    OutputsAlreadySignedError,
     SecretTooLongError,
     TransactionError,
     TransactionUnitError,
 )
+from ..core.nuts import nut20
 from ..core.settings import settings
-from ..lightning.base import LightningBackend
-from ..mint.crud import LedgerCrud
 from .conditions import LedgerSpendingConditions
-from .db.read import DbReadHelper
-from .db.write import DbWriteHelper
 from .protocols import SupportsBackends, SupportsDb, SupportsKeysets
 
 
@@ -33,14 +32,6 @@ class LedgerVerification(
     LedgerSpendingConditions, SupportsKeysets, SupportsDb, SupportsBackends
 ):
     """Verification functions for the ledger."""
-
-    keyset: MintKeyset
-    keysets: Dict[str, MintKeyset]
-    crud: LedgerCrud
-    db: Database
-    db_read: DbReadHelper
-    db_write: DbWriteHelper
-    lightning: Dict[Unit, LightningBackend]
 
     async def verify_inputs_and_outputs(
         self,
@@ -50,6 +41,8 @@ class LedgerVerification(
         conn: Optional[Connection] = None,
     ):
         """Checks all proofs and outputs for validity.
+
+        Warning: Does NOT check if the proofs were already spent. Use `db_write._verify_proofs_spendable` for that.
 
         Args:
             proofs (List[Proof]): List of proofs to check.
@@ -77,7 +70,7 @@ class LedgerVerification(
             raise TransactionError("duplicate proofs.")
         # Verify ecash signatures
         if not all([self._verify_proof_bdhke(p) for p in proofs]):
-            raise TransactionError("could not verify proofs.")
+            raise InvalidProofsError()
         # Verify input spending conditions
         if not all([self._verify_input_spending_conditions(p) for p in proofs]):
             raise TransactionError("validation of input spending conditions failed.")
@@ -139,7 +132,7 @@ class LedgerVerification(
         # verify that outputs have not been signed previously
         signed_before = await self._check_outputs_issued_before(outputs, conn)
         if any(signed_before):
-            raise TransactionError("outputs have already been signed before.")
+            raise OutputsAlreadySignedError()
         logger.trace(f"Verified {len(outputs)} outputs.")
 
     async def _check_outputs_issued_before(
@@ -277,3 +270,16 @@ class LedgerVerification(
             )
 
         return unit, method
+
+    def _verify_mint_quote_witness(
+        self,
+        quote: MintQuote,
+        outputs: List[BlindedMessage],
+        signature: Optional[str],
+    ) -> bool:
+        """Verify signature on quote id and outputs"""
+        if not quote.pubkey:
+            return True
+        if not signature:
+            return False
+        return nut20.verify_mint_quote(quote.quote, outputs, quote.pubkey, signature)
